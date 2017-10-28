@@ -148,6 +148,12 @@ int main(int argc, char **argv){
 	int rv;
 	char buf[4096] __attribute__((aligned));
 
+
+	if(argc < 3){
+		printf("[+] Usage : %s <target domain>\n",argv[0]);
+		exit(1);
+	}
+
 	iptable_set();
 	target = argv[1];
 
