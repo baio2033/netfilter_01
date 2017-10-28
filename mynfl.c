@@ -7,9 +7,21 @@
 #include <errno.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
 #include "sys/types.h"
-#include "regex.h"
+#include <netinet/ip.h>
+#include <string.h>
 
 char *target;
+
+struct tcphdr{
+	u_int16_t src;
+	u_int16_t dst;
+	u_int32_t seq;
+	u_int32_t ack;
+	u_int8_t tcp_rec:4, hlen:4;
+	u_int16_t win;
+	u_int16_t checksum;
+	u_int16_t u_ptr;
+};
 
 typedef struct _return{
 	int id;
@@ -21,26 +33,14 @@ void iptable_set(){
 	system("iptables -F");
 	system("iptables -A OUTPUT -j NFQUEUE --queue-num 0");
 	system("iptables -A INPUT -j NFQUEUE --queue-num 0");
-	printf(system("iptables -L"));
+	//printf(system("iptables -L"));
 	printf("\n\n");
 }
 
 void iptable_restore(){
 	system("iptables -F");
-	printf(system("iptables -L"));
+	//printf(system("iptables -L"));
 	printf("\n[+] TERMINATE THE PROGRAM\n");
-}
-
-void reg_check(u_char *data){
-	regex_t state;
-	const char *pattern = "(Host:) ([^/n]*)";
-	int index;
-	regcomp(&state, pattern, REG_EXTENDED);
-	int status = regexec(&state, data, 0, NULL, 0);
-	if(status == 0)
-		printf("\nmatch\n%s\n",data);
-	else
-		printf("\nno match\n");
 }
 
 void dump(u_char *data, int len){
@@ -51,11 +51,40 @@ void dump(u_char *data, int len){
 	}
 }
 
-int compare(u_char *data, int len){
+int check(u_char *data, int len){
 	int flag = 0;
 	int target_len = strlen(target);
-	data += 40;
-	for(int i=0;i<len-40;i++){
+	u_int16_t packet_len;
+	u_int32_t ip_len;
+	u_int32_t tcp_len;
+	struct ip *ip_hdr;
+	struct tcphdr *tcp_hdr;
+	char *method[] = {"GET", "POST", "HEAD", "PUT", "DELETE", "OPTIONS"};
+	ip_hdr = (struct ip*)data;
+
+	if(ip_hdr->ip_p != 6)
+		return flag;
+
+	ip_len = ip_hdr->ip_hl * 4;
+	packet_len = ntohs(ip_hdr->ip_len);
+	/*printf("\n[+] packet info\n");
+	printf("ip header length : %d\n", ip_len);
+	printf("packet length : %d\n", packet_len);*/
+
+	tcp_hdr = (struct tcphdr *)(data + ip_len);
+	tcp_len = tcp_hdr->hlen * 4;
+	//printf("tcp header length : %d\n", tcp_len);
+	
+	data += ip_len;
+	data += tcp_len;
+	for(int i=0;i<6;i++){
+		if(!strncmp(data, method[i], strlen(method[i]))){
+			printf("\nmethod : %s\n", method[i]);
+			break;
+		}
+		if(i == 5) return flag;
+	}
+	for(int i=0;i<len-ip_len-tcp_len;i++){
 		if(!strncmp(data,"Host: ",6)){
 			if(!strncmp(data+6, target, target_len)){
 				printf("%s\n",data);
@@ -81,30 +110,24 @@ return_val print_pkt(struct nfq_data *tb){
 	ph = nfq_get_msg_packet_hdr(tb);
 	if(ph){
 		ret_val.id = ntohl(ph->packet_id);
-		printf("hw_protocol=0x%04x hook=%u id=%u ",ntohs(ph->hw_protocol), ph->hook, id);
+		//printf("hw_protocol=0x%04x hook=%u id=%u ",ntohs(ph->hw_protocol), ph->hook, id);
 	}
 
 	hwph = nfq_get_packet_hw(tb);
 	if(hwph){
 		int i, hlen = ntohs(hwph->hw_addrlen);
 
-		printf("hw_src_addr=");
+		/*printf("hw_src_addr=");
 		for(i=0;i<hlen-1;i++)
 			printf("%02x:", hwph->hw_addr[i]);
-		printf("%02x ",hwph->hw_addr[hlen-1]);
+		printf("%02x ",hwph->hw_addr[hlen-1]);*/
 	}
 
 	ret = nfq_get_payload(tb, &data);
 	if(ret >= 0){
-		printf("payload length = %d\n", ret);
-		//dump2(data, ret);
-		//convert(data, ret);
-		//dump3(data);
-		//reg_check(data);
-		ret_val.flag = compare(data,ret);
+		//printf("payload length = %d\n", ret);
+		ret_val.flag = check(data,ret);
 	}
-
-	printf("\n");
 
 	return ret_val;
 }
@@ -112,7 +135,7 @@ return_val print_pkt(struct nfq_data *tb){
 static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfa, void *data){
 	return_val ret_val;
 	ret_val = print_pkt(nfa);
-	printf("entering callback\n");
+	//printf("entering callback\n");
 	if(ret_val.flag)
 		return nfq_set_verdict(qh, ret_val.id, NF_DROP, 0, NULL);
 	else
@@ -166,7 +189,7 @@ int main(int argc, char **argv){
 
 	while(1){
 		if((rv = recv(fd, buf, sizeof(buf), 0)) >= 0){
-			printf("packet received\n");
+			//printf("packet received\n");
 			nfq_handle_packet(h, buf, rv);
 			continue;
 		}
@@ -187,6 +210,8 @@ int main(int argc, char **argv){
 
 	printf("[+] closing library handle\n");
 	nfq_close(h);
+
+	iptable_restore();
 
 	return 0;
 }
