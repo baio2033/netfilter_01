@@ -11,6 +11,11 @@
 
 char *target;
 
+typedef struct _return{
+	int id;
+	int flag;
+}return_val;
+
 void iptable_set(){
 	printf("\n[+] iptable setting\n\n");
 	system("iptables -F");
@@ -46,32 +51,36 @@ void dump(u_char *data, int len){
 	}
 }
 
-void compare(u_char *data, int len){
+int compare(u_char *data, int len){
+	int flag = 0;
 	int target_len = strlen(target);
 	data += 40;
 	for(int i=0;i<len-40;i++){
 		if(!strncmp(data,"Host: ",6)){
 			if(!strncmp(data+6, target, target_len)){
 				printf("%s\n",data);
-				break;
+				flag = 1;
+				return flag;
 			}
 		}
 		else
 			data++;
 	}
+	return flag;
 }
 
-static u_int32_t print_pkt(struct nfq_data *tb){
+return_val print_pkt(struct nfq_data *tb){
 	int id = 0;
 	struct nfqnl_msg_packet_hdr *ph;
 	struct nfqnl_msg_packet_hw *hwph;
 	u_int32_t mark,ifi;
 	int ret;
 	u_char *data;
+	return_val ret_val;
 
 	ph = nfq_get_msg_packet_hdr(tb);
 	if(ph){
-		id = ntohl(ph->packet_id);
+		ret_val.id = ntohl(ph->packet_id);
 		printf("hw_protocol=0x%04x hook=%u id=%u ",ntohs(ph->hw_protocol), ph->hook, id);
 	}
 
@@ -92,18 +101,22 @@ static u_int32_t print_pkt(struct nfq_data *tb){
 		//convert(data, ret);
 		//dump3(data);
 		//reg_check(data);
-		compare(data,ret);
+		ret_val.flag = compare(data,ret);
 	}
 
 	printf("\n");
 
-	return id;
+	return ret_val;
 }
 
 static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *nfa, void *data){
-	u_int32_t id = print_pkt(nfa);
+	return_val ret_val;
+	ret_val = print_pkt(nfa);
 	printf("entering callback\n");
-	return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
+	if(ret_val.flag)
+		return nfq_set_verdict(qh, ret_val.id, NF_DROP, 0, NULL);
+	else
+		return nfq_set_verdict(qh, ret_val.id, NF_ACCEPT, 0, NULL);
 }
 
 int main(int argc, char **argv){
