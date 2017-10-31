@@ -60,8 +60,10 @@ int check(u_char *data, int len){
 	struct ip *ip_hdr;
 	struct tcphdr *tcp_hdr;
 	char *method[] = {"GET", "POST", "HEAD", "PUT", "DELETE", "OPTIONS"};
-	ip_hdr = (struct ip*)data;
+	char *http_met;
 
+	ip_hdr = (struct ip*)data;
+	
 	if(ip_hdr->ip_p != 6)
 		return flag;
 
@@ -79,13 +81,15 @@ int check(u_char *data, int len){
 	data += tcp_len;
 	for(int i=0;i<6;i++){
 		if(strstr(data, method[i])){
-			printf("\n[+] method : %s\n", method[i]);
+			//printf("\n[+] method : %s\n", method[i]);
+			http_met = method[i];
 			break;
 		}
 		if(i == 5) return flag;
 	}
 	for(int i=0;i<len-ip_len-tcp_len;i++){
 		if(strstr(data, target)){
+				printf("\n[+] method : %s\n", http_met);
 				printf("%s\n",strstr(data, "Host: "));
 				flag = 1;
 				return flag;
